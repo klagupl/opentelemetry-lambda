@@ -17,9 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
-	"os"
-
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/confmap/converter/expandconverter"
@@ -27,6 +24,7 @@ import (
 	"go.opentelemetry.io/collector/confmap/provider/fileprovider"
 	"go.opentelemetry.io/collector/confmap/provider/yamlprovider"
 	"go.opentelemetry.io/collector/service"
+	"log"
 )
 
 var (
@@ -47,27 +45,19 @@ type Collector struct {
 	stopped        bool
 }
 
-func getConfig() string {
-	val, ex := os.LookupEnv("OPENTELEMETRY_COLLECTOR_CONFIG_FILE")
-	if !ex {
-		return "/opt/collector-config/config.yaml"
-	}
-	log.Printf("Using config file at path %v", val)
-	return val
-}
-
-func NewCollector(factories component.Factories) *Collector {
+func NewCollector(factories component.Factories, config string) *Collector {
 	providers := []confmap.Provider{fileprovider.New(), envprovider.New(), yamlprovider.New()}
 	mapProvider := make(map[string]confmap.Provider, len(providers))
-
 	for _, provider := range providers {
 		mapProvider[provider.Scheme()] = provider
 	}
-
+	logger.Info(config)
 	cfgSet := service.ConfigProviderSettings{
-		Locations:     []string{getConfig()},
-		MapProviders:  mapProvider,
-		MapConverters: []confmap.Converter{expandconverter.New()},
+		ResolverSettings: confmap.ResolverSettings{
+			URIs:       []string{config},
+			Providers:  mapProvider,
+			Converters: []confmap.Converter{expandconverter.New()},
+		},
 	}
 	cfgProvider, err := service.NewConfigProvider(cfgSet)
 
