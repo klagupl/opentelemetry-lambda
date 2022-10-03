@@ -17,7 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/aws/aws-sdk-go-v2/aws"
 	awsConfig "github.com/aws/aws-sdk-go-v2/config"
 	"log"
 	"os"
@@ -47,12 +46,7 @@ func main() {
 	ssmClient = ssm.NewFromConfig(cfg)
 
 	factories, _ := lambdacomponents.Components()
-	config, err := getSsmConfig()
-	if err != nil {
-		logger.Error("%s", zap.Field{String: err.Error()})
-		config = getConfig()
-	}
-	collector := NewCollector(factories, config)
+	collector := NewCollector(factories)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	if err := collector.Start(ctx); err != nil {
@@ -77,36 +71,6 @@ func main() {
 	// Will block until shutdown event is received or cancelled via the context.
 	processEvents(ctx, collector)
 }
-
-func getSsmConfig() (string, error) {
-	output, err := ssmClient.GetParameter(context.Background(), &ssm.GetParameterInput{
-		Name: aws.String(os.Getenv("OPENTELEMETRY_SSM_PARAMETER_NAME")),
-	})
-	if err != nil {
-		return "", err
-	}
-	path := "/tmp/" + "ssm_collector.yml"
-	file, err := os.Create(path)
-	if err != nil {
-		return "", err
-	}
-	_, err = file.WriteString(*output.Parameter.Value)
-	if err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-func getConfig() string {
-
-	val, ex := os.LookupEnv("OPENTELEMETRY_COLLECTOR_CONFIG_FILE")
-	if !ex {
-		return "/opt/collector-config/config.yaml"
-	}
-	log.Printf("Using config file at path %v", val)
-	return val
-}
-
 func processEvents(ctx context.Context, collector *Collector) {
 	for {
 		select {

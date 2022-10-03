@@ -17,6 +17,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/confmap/converter/expandconverter"
@@ -25,6 +28,7 @@ import (
 	"go.opentelemetry.io/collector/confmap/provider/yamlprovider"
 	"go.opentelemetry.io/collector/service"
 	"log"
+	"os"
 )
 
 var (
@@ -33,6 +37,8 @@ var (
 
 	// GitHash variable will be replaced at link time after `make` has been run.
 	GitHash = "<NOT PROPERLY GENERATED>"
+
+	DefaultCollectorConfig = "/opt/collector-config/config.yaml"
 )
 
 // Collector implements the OtelcolRunner interfaces running a single otelcol as a go routine within the
@@ -45,16 +51,51 @@ type Collector struct {
 	stopped        bool
 }
 
-func NewCollector(factories component.Factories, config string) *Collector {
+func getSsmConfig(parameterName string) (string, error) {
+	output, err := ssmClient.GetParameter(context.Background(), &ssm.GetParameterInput{
+		Name: aws.String(parameterName),
+	})
+	if err != nil {
+		return "", errors.Wrap(err, "")
+	}
+	path := "/tmp/" + "ssm_collector.yml"
+	file, err := os.Create(path)
+	if err != nil {
+		return "", errors.Wrap(err, "")
+	}
+	_, err = file.WriteString(*output.Parameter.Value)
+	if err != nil {
+		return "", errors.Wrap(err, "")
+	}
+	return path, nil
+}
+
+func getConfig() string {
+	ssmEnv, ex := os.LookupEnv("OPENTELEMETRY_SSM_PARAMETER")
+	if ex {
+		ssmConfig, err := getSsmConfig(ssmEnv)
+		if err != nil {
+			return ssmConfig
+		}
+	}
+	val, ex := os.LookupEnv("OPENTELEMETRY_COLLECTOR_CONFIG_FILE")
+	if !ex {
+		return "/opt/collector-config/config.yaml"
+	}
+	return val
+}
+
+func NewCollector(factories component.Factories) *Collector {
 	providers := []confmap.Provider{fileprovider.New(), envprovider.New(), yamlprovider.New()}
 	mapProvider := make(map[string]confmap.Provider, len(providers))
 	for _, provider := range providers {
 		mapProvider[provider.Scheme()] = provider
 	}
-	logger.Info(config)
+
+	log.Printf("Using config file at path %v", config)
 	cfgSet := service.ConfigProviderSettings{
 		ResolverSettings: confmap.ResolverSettings{
-			URIs:       []string{config},
+			URIs:       []string{getConfig()},
 			Providers:  mapProvider,
 			Converters: []confmap.Converter{expandconverter.New()},
 		},
